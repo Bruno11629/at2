@@ -1,0 +1,367 @@
+---
+title: "116297at2"
+author: "Bruno C Peixoto - RA 116297"
+output: html_document
+---
+```{r setup,message=FALSE, warning=FALSE,echo=FALSE}
+library(tidyverse)
+library(MASS)
+library(gridExtra)
+```
+
+```{r banco de dados,message=FALSE, warning=FALSE,echo=FALSE}
+dados= read_table2("at2/tobacco.txt")
+```
+
+#Parte I - Análise de Dados
+##Modelo 1
+```{r ,message=FALSE, warning=FALSE}
+fit1= lm(perctNicotine~ perctN + perctK,data = dados)
+summary(fit1)
+```
+Nota-se que ambos os coeficientes são significativos, e que o coeficiente de nicotina é positivo, logo a relação
+entre as porcentagens de nicotina e nitrogênio foi captada pelo modelo
+
+##Modelo 2 
+```{r}
+fit2 =lm(burnRate~ perctChlorine + perctK + perctP,data = dados)
+summary(fit2)
+```
+
+Removendo-se $X_3$  
+```{r}
+
+fit2.1= lm(burnRate~ perctChlorine + perctP,data = dados)
+summary(fit2.1)
+```
+No primeiro modelo $X_4$ não é significativo, porém quando removemos $X_3$ do modelo, $X_4$ passa a ser significante e
+todos os coeficientes tem seu valor acrescido, em módudo. Este comportamente pode ser explicado por uma estrutura de 
+correlação nas variaveis preditoras. Nota-se também que o $R^2$ tem uma queda brusca, mostrando que a variabilidade
+esplicada pelo modelo decai bastante.
+
+##Modelo 3
+```{r}
+fit3 =lm(perctSugar~ perctN+ perctChlorine + perctCa + perctMg,data = dados)
+summary(fit3)
+```
+
+Modelo reduzido
+```{r}
+fit3.1= lm(perctSugar~ perctN+ perctChlorine,data = dados)
+summary(fit3.1)
+```
+No primeiro modelo as variaveis $X_5$ e $X_6$ não são significativas e $X_2$ é mais significativa do que $X_1$. No 
+entanto,ao remover as variaveis não significativas, $X_1$ torna-se mais siginifcativo do que $X_2$. 
+
+##Modelo 4
+```{r}
+y= as.matrix(dados[1:3])
+fit4= manova(y~ perctN+ perctChlorine+ perctK+ perctP+ perctCa+ perctMg,dados)
+```
+
+
+###Analise de Residuos
+```{r}
+beta_hat=fit4$coefficients
+x= as.matrix(dados[4:9])
+x= cbind(1,x)
+y_hat= x %*% beta_hat
+residuos= y - y_hat
+```
+
+Gráficos das densidades marginais estimadas para cada variável
+```{r}
+par(mfrow= c(2,2))
+plot(density(residuos[,1]),main = "Burn Rate",xlab = "Residuo")
+plot(density(residuos[,2]),main = "Sugar (%)",xlab = "Residuo")
+plot(density(residuos[,3]),main = "Nicotine (%)",xlab = "Residuo")
+```
+
+Scatterplots dois a dois
+```{r, warning=F,message=F}
+plot1=ggplot(as.data.frame(residuos),aes(x= burnRate,y= perctSugar))+
+  geom_point()+
+  xlim(-2.5,2.5)+
+  ylim(-2.5,2.5)
+plot2=ggplot(as.data.frame(residuos),aes(x= burnRate,y= perctNicotine))+
+  geom_point()+
+  xlim(-1,1)+
+  ylim(-1,1)
+plot3= ggplot(as.data.frame(residuos),aes(y= perctSugar,x= perctNicotine))+
+  geom_point()+
+  xlim(-2.5,2.5)+
+  ylim(-2.5,2.5)
+grid.arrange(plot1,plot2,plot3,ncol=3)
+```
+
+A partir dos gráficos das densidades estimadas, observa-se que o comportamento dos resíduos não é exatamente normal,
+porém existe certa simetria e as caldas não pesadas. Nos scatterplots o comportamento das variáveis, principalmente nos
+dois primeiros gráficos, o comportamento dos resíduos não é tão distante de uma elipse. Levando em conta que a amostra
+tem somente 25 observações, existe certa razoabilidade na suposição de normalidade multivariada.
+
+##Melhorando o modelo
+```{r}
+summary(fit4)
+```
+Uma aternativa para melhorar o modelo seria retirar as variaveis pouco significativas, no entanto, como verificado
+nos primeiros itens, existe estruturas de dependencia entre as variaveis preditoras, retirar variaveis altera a 
+interpretação das outras. Outra alternativa seria utilizar os componentes principais de x, no entanto perderia-se em
+interpretabilidade, mas haveria um ganho em predição.
+
+##Convariância explicada pelos dados
+A proporção da covariâcia dos explicada dos dados pode ser obtida de forma análoga ao $R^2$ no modelo univariado
+dividido-se o derterminate da matriz $E$ pelo determinate de $(n-1)S$
+```{r}
+tts= (t(y) %*% y) - nrow(y)*(apply(y, 2,mean) %*% t(apply(y,2, mean)))
+E= ( t(y) %*% y) - (t(beta_hat) %*% t(x) %*% y)
+pseudo_r2= 1-det(E)/det(tts)
+```
+Para este modelo a proporção da covariância explicada é `r round(pseudo_r2,3)`
+
+###Predição
+Para obter valores de $Y$ a partir de novos valores de $X$, pode ser feito multiplicando-se $X$ por $\hat\beta$
+```{r}
+pred_y= function(beta_hat,x_novo){
+  x_novo= c(1,x_novo)
+  pred= x_novo %*% beta_hat
+  return(pred)
+}
+```
+Exemplos serão dados abaixo
+
+## Estimado-se $Y$ a partir de $E(Y|X)$
+$$E(Y|X) = \mu_y + \Sigma_{12} \Sigma_{22}^{-1}(x-\mu_x)$$
+Os parâmentros são substituídos pelos seus esmimadores
+```{r}
+mu_hat = apply(dados, 2, mean)
+sigma_hat= var(dados)
+pred_y_tiu= function(mu_hat,simgma_hat,x_novo){
+  pred= mu_hat[1:3]+ sigma_hat[1:3,4:9] %*% 
+    solve(sigma_hat[4:9,4:9]) %*% (x_novo- mu_hat[4:9])
+  return(pred)
+}
+```
+
+$x= \hat\mu_x$
+```{r}
+novo1 = mu_hat[1:6]
+y1hat=pred_y(beta_hat,novo1)
+y1_hat=as.data.frame(cbind("Y_hat",colnames(y1hat)))
+y1_hat= cbind(t(y1hat),y1_hat)
+names(y1_hat)= c("Valor","Predicao","Variavel")
+
+y1tiu=pred_y_tiu(mu_hat,sigma_hat,novo1)
+y1_tiu=as.data.frame(cbind("Y_tiu",rownames(y1_hat)))
+y1_tiu= cbind(y1tiu,y1_tiu)
+names(y1_tiu)= c("Valor","Predicao","Variavel")
+y1_pred= rbind(y1_hat,y1_tiu)
+
+ggplot(y1_pred,aes(x=Variavel,y=Valor,fill=Predicao))+
+  geom_bar(stat= "identity",position = "dodge")
+```
+
+$x= \bar0$
+```{r}
+novo2= rep(0,6)
+y2hat=pred_y(beta_hat,novo2)
+y2_hat=as.data.frame(cbind("Y_hat",colnames(y2hat)))
+y2_hat= cbind(t(y2hat),y2_hat)
+names(y2_hat)= c("Valor","Predicao","Variavel")
+
+y2tiu=pred_y_tiu(mu_hat,sigma_hat,novo2)
+y2_tiu=as.data.frame(cbind("Y_tiu",rownames(y2_hat)))
+y2_tiu= cbind(y2tiu,y2_tiu)
+names(y2_tiu)= c("Valor","Predicao","Variavel")
+y2_pred= rbind(y2_hat,y2_tiu)
+
+ggplot(y2_pred,aes(x=Variavel,y=Valor,fill=Predicao))+
+  geom_bar(stat= "identity",position = "dodge")
+
+```
+
+$x$ aleatório 
+```{r}
+novo3= rnorm(6,50,30)
+y3hat=pred_y(beta_hat,novo3)
+y3_hat=as.data.frame(cbind("Y_hat",colnames(y3hat)))
+y3_hat= cbind(t(y3hat),y3_hat)
+names(y3_hat)= c("Valor","Predicao","Variavel")
+
+y3tiu=pred_y_tiu(mu_hat,sigma_hat,novo3)
+y3_tiu=as.data.frame(cbind("Y_tiu",rownames(y3_hat)))
+y3_tiu= cbind(y3tiu,y3_tiu)
+names(y3_tiu)= c("Valor","Predicao","Variavel")
+y3_pred= rbind(y3_hat,y3_tiu)
+
+ggplot(y3_pred,aes(x=Variavel,y=Valor,fill=Predicao))+
+  geom_bar(stat= "identity",position = "dodge")
+```
+
+A partir das funçõs implementadas é possivel obter predições para $Y$ com um novo valor de $x$. Note que para ambos os
+métodos de previsão é o mesmo
+
+#Parte 2- Simulações
+
+```{r,cache=TRUE}
+beta0= rbind(beta_hat[1,],0,0,0,0,0,0)
+beta1= rbind(beta_hat[1,],beta_hat[2,],0,0,0,0,0)
+beta2= rbind(beta_hat[1,],0,beta_hat[3,],0,0,0,0)
+beta3= rbind(beta_hat[1,],0,0,beta_hat[4,],0,0,0)
+beta4= rbind(beta_hat[1,],0,0,0,beta_hat[5,],0,0)
+beta5= rbind(beta_hat[1,],0,0,0,0,beta_hat[6,],0)
+beta6= rbind(beta_hat[1,],0,0,0,0,0,beta_hat[7,])
+betamin= cbind(rep(min(beta_hat[2:7,1]),6),rep(min(beta_hat[2:7,2]),6),
+               rep(min(beta_hat[2:7,3]),6))
+betamin= rbind(beta_hat[1,],betamin)
+betamax= cbind(rep(max(beta_hat[2:7,1]),6),rep(max(beta_hat[2:7,2]),6),
+               rep(max(beta_hat[2:7,3]),6))
+betamax= rbind(beta_hat[1,],betamax)
+betas= cbind(beta0,beta1,beta2,beta3,beta4,beta5,beta6,betamin,betamax,beta_hat)
+
+x= as.matrix(dados[4:9])
+x= cbind(1,x)
+y_star= x %*% betas
+x= as.matrix(dados[4:9])
+sigmaRes= t(residuos) %*% residuos/(25-7)
+
+freqpillai=rep(0,10)
+freqwilks=rep(0,10)
+freqHL=rep(0,10)
+freqroy=rep(0,10)
+
+set.seed(13)
+freqpillai=rep(0,10)
+freqwilks=rep(0,10)
+freqHL=rep(0,10)
+freqroy=rep(0,10)
+
+for(i in 1:500){
+erro= mvrnorm(25,mu= c(0,0,0) ,Sigma = sigmaRes)
+
+y_0= y_star[,1:3] + erro
+pillai0= summary(manova(y_0~x),test= "Pillai")$stats[11] >0.05
+wilks0=summary( manova(y_0~x),test= "Wilks")$stats[11] >0.05
+HL0=summary( manova(y_0~x),test= "Hotelling-Lawley")$stats[11] >0.05
+roy0= summary( manova(y_0~x),test= "Roy")$stats[11] >0.05
+
+y_1= y_star[,4:6] + erro
+pillai1= summary(manova(y_1~x),test= "Pillai")$stats[11] >0.05
+wilks1=summary( manova(y_1~x),test= "Wilks")$stats[11] >0.05
+HL1=summary( manova(y_1~x),test= "Hotelling-Lawley")$stats[11] >0.05
+roy1= summary( manova(y_1~x),test= "Roy")$stats[11] >0.05
+
+y_2= y_star[,7:9] + erro
+pillai2= summary(manova(y_2~x),test= "Pillai")$stats[11] >0.05
+wilks2=summary( manova(y_2~x),test= "Wilks")$stats[11] >0.05
+HL2=summary( manova(y_2~x),test= "Hotelling-Lawley")$stats[11] >0.05
+roy2= summary( manova(y_2~x),test= "Roy")$stats[11] >0.05
+
+y_3= y_star[,10:12] + erro
+pillai3= summary(manova(y_3~x),test= "Pillai")$stats[11] >0.05
+wilks3=summary( manova(y_3~x),test= "Wilks")$stats[11] >0.05
+HL3=summary( manova(y_3~x),test= "Hotelling-Lawley")$stats[11] >0.05
+roy3= summary( manova(y_3~x),test= "Roy")$stats[11] >0.05
+
+y_4= y_star[,13:15] + erro
+pillai4= summary(manova(y_4~x),test= "Pillai")$stats[11] >0.05
+wilks4=summary( manova(y_4~x),test= "Wilks")$stats[11] >0.05
+HL4=summary( manova(y_4~x),test= "Hotelling-Lawley")$stats[11] >0.05
+roy4= summary( manova(y_4~x),test= "Roy")$stats[11] >0.05
+
+y_5= y_star[,16:18] + erro
+pillai5= summary(manova(y_5~x),test= "Pillai")$stats[11] >0.05
+wilks5=summary( manova(y_5~x),test= "Wilks")$stats[11] >0.05
+HL5=summary( manova(y_5~x),test= "Hotelling-Lawley")$stats[11] >0.05
+roy5= summary( manova(y_5~x),test= "Roy")$stats[11] >0.05
+
+y_6= y_star[,19:21] + erro
+pillai6= summary(manova(y_6~x),test= "Pillai")$stats[11] >0.05
+wilks6=summary( manova(y_6~x),test= "Wilks")$stats[11] >0.05
+HL6=summary( manova(y_6~x),test= "Hotelling-Lawley")$stats[11] >0.05
+roy6= summary( manova(y_6~x),test= "Roy")$stats[11] >0.05
+
+y_min= y_star[,22:24] + erro
+pillaimin= summary(manova(y_min~x),test= "Pillai")$stats[11] >0.05
+wilksmin=summary( manova(y_min~x),test= "Wilks")$stats[11] >0.05
+HLmin=summary( manova(y_min~x),test= "Hotelling-Lawley")$stats[11] >0.05
+roymin= summary( manova(y_min~x),test= "Roy")$stats[11] >0.05
+
+y_max= y_star[,25:27] + erro
+pillaimax= summary(manova(y_max~x),test= "Pillai")$stats[11] >0.05
+wilksmax=summary( manova(y_max~x),test= "Wilks")$stats[11] >0.05
+HLmax=summary( manova(y_max~x),test= "Hotelling-Lawley")$stats[11] >0.05
+roymax= summary( manova(y_max~x),test= "Roy")$stats[11] >0.05
+
+y_hat= y_star[,28:30] + erro
+pillaihat= summary(manova(y_hat~x),test= "Pillai")$stats[11] > 0.05
+wilkshat=summary( manova(y_hat~x),test= "Wilks")$stats[11] > 0.05
+HLhat=summary( manova(y_hat~x),test= "Hotelling-Lawley")$stats[11] > 0.05
+royhat= summary( manova(y_hat~x),test= "Roy")$stats[11] > 0.05
+
+pillai_rejeita= c(pillai0,pillai1,pillai2,pillai3,pillai4,pillai5,
+                  pillai6,pillaimin,pillaimax,pillaihat)
+wilks_rejeita= c(wilks0,wilks1,wilks2,wilks3,wilks4,wilks5,
+                  wilks6,wilksmin,wilksmax,wilkshat)
+HL_rejeita= c(HL0,HL1,HL2,HL3,HL4,HL5,
+                  HL6,HLmin,HLmax,HLhat)
+roy_rejeita= c(roy0,roy1,roy2,roy3,roy4,roy5,
+                  roy6,roymin,roymax,royhat)
+
+freqpillai= freqpillai+ pillai_rejeita
+freqwilks= freqwilks+wilks_rejeita
+freqHL=freqHL+HL_rejeita
+freqroy=  freqroy+roy_rejeita
+}
+
+poder_pillai= 1-freqpillai/500
+poder_wilks=1-(freqwilks/500)
+poder_HL= 1-(freqHL/500)
+poder_roy= 1-(freqroy/500)
+
+casos= c("Caso 1","Caso 2","Caso 3","Caso 4","Caso 5","Caso 6","Caso 7","Caso 8","Caso 9","Caso 10")
+pillai= as.data.frame(poder_pillai)
+pillai= cbind(pillai,casos)
+names(pillai)=c("Poder","Casos")
+
+wilks= as.data.frame(poder_wilks)
+wilks= cbind(wilks,casos)
+names(wilks)=c("Poder","Casos")
+
+HL= as.data.frame(poder_HL)
+HL= cbind(HL,casos)
+names(HL)=c("Poder","Casos")
+
+roy= as.data.frame(poder_roy)
+roy= cbind(roy,casos)
+names(roy)=c("Poder","Casos")
+```
+
+#Pillai
+```{r}
+ggplot(pillai,aes(y=Poder, x= Casos))+
+  geom_bar(stat = "identity",position = "dodge")
+```
+
+#Wilks
+```{r}
+ggplot(wilks,aes(y=Poder, x= Casos))+
+  geom_bar(stat = "identity",position = "dodge")
+```
+
+#H-L
+```{r}
+ggplot(HL,aes(y=Poder, x= Casos))+
+  geom_bar(stat = "identity",position = "dodge")
+```
+
+#Roy
+```{r}
+ggplot(roy,aes(y=Poder, x= Casos))+
+  geom_bar(stat = "identity",position = "dodge")
+```
+
+Os testes de Pillai, Wilks e H-L  rejeitaram a hipótese nula quando ela era verdadeira cerca de 5% das vezes, já o
+teste de Roy rejitou muito mais do que isto. Todos os testes rejeitaram a hipótese nula 100% ou quase, quando os
+betas eram o minimo, o máximo e $\hat\beta$. A melhor performance foi de  Hotteling, porém Wilks e Pillai foram 
+satisfatórias. O teste de Roy teve os melhores poderes em geral, porém este rejeitou demasiadamente a hipótese nula
+
